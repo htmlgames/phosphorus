@@ -4,11 +4,17 @@
 <title>phosphorus</title>
 <link rel=stylesheet href=player.css>
 <link rel=stylesheet href=index.css>
+<link rel=stylesheet href=touch.css>
 
 <div class=area id=title-area>
 <h1 class=title>phosphorus</h1>
 <p>phosphorus runs your Scratch projects really fast by compiling them to JavaScript. Try it out by pasting a URL or project ID into the field below or <a class=dropdown>choosing an example<select id=examples>
   <option value>
+  <option value=102592962>Manic Miner ! by Dogtopius
+  <option value=102572692>CRATE platformer by n-gauge
+  <option value=56667792>FNAF2 by ???
+  <option value=74096796>Burger Kong by jetpac
+  <option value=74221074>Flight Sim by WO997
   <option value=11397100>3D Remix by DadOfMrLog
   <option value=15945630>O by DCPU-16
   <option value=10128407>Paper Minecraft by griffpatch
@@ -18,6 +24,7 @@
   <option value=34791164>gb.sb2 [Mario Land 2] by DCPU-16
   <option value=21554369>Epic Ninja by griffpatch
   <option value=15832807>Pretty by blob8108
+  <option value=54931060>Super Hexagon Demo by novice27b
 </select></a>.</p>
 </div>
 
@@ -39,6 +46,22 @@
   <div class=progress-bar></div>
   <input class=url value=http://scratch.mit.edu/projects/>
   <a target=_blank class=project-link title="View project on Scratch"></a>
+</div>
+
+<div id="touchscreen">
+  <div>
+    <img src="../jsnes/images/up_arrow.png" id="touch_up" oncontextmenu="return false;" ontouchstart="checkGamepad('up')" ontouchend="checkGamepad('up_cancel')">
+  </div>
+
+<img src="../jsnes/images/left_arrow.png" id="touch_left" oncontextmenu="return false;" ontouchstart="checkGamepad('left')" ontouchend="checkGamepad('left_cancel')">
+<img src="../jsnes/images/right_arrow.png" id="touch_right" oncontextmenu="return false;" ontouchstart="checkGamepad('right')" ontouchend="checkGamepad('right_cancel')">
+
+<img id="touch_B" src="../jsnes/images/b_button.png" oncontextmenu="return false;" ontouchstart="checkGamepad('b')" ontouchend="checkGamepad('none')">
+
+  <div>
+    <img src="../jsnes/images/down_arrow.png" id="touch_down" oncontextmenu="return false;" ontouchstart="checkGamepad('down')" ontouchend="checkGamepad('down_cancel')">
+    <img id="touch_A" src="../jsnes/images/a_button.png" oncontextmenu="return false;" ontouchstart="checkGamepad('a')" ontouchend="checkGamepad('none')">
+  </div>
 </div>
 
 <div class=area id=project-area>
@@ -73,15 +96,15 @@
 </div>
 <section>
   <h1>Credits</h1>
-  <p>phosphorus was created by <a href=https://github.com/nathan>Nathan Dinsmore</a>. Its CPS-style compilation and overall design was inspired by <a href=https://github.com/RHY3756547>Rhys Simpson</a>'s <a href=https://code.google.com/p/sb2-js/>sb2.js</a>. It would have more bugs if not for <a href=https://github.com/trumank>Truman Kilen</a>. It uses the <a href=http://stuk.github.io/jszip/>JSZip</a> library, created by <a href=https://github.com/stuk>Stuart Knightley</a>, <a href=https://github.com/dduponchel>David Duponchel</a>, Franz Buchinger, and <a href=https://github.com/aadsm>António Afonso</a>, to read <code>.sb2</code> files and compressed projects, and the <a href=https://code.google.com/p/canvg/>canvg</a> library, created by <a href=https://code.google.com/u/gabelerner@gmail.com/>Gabe Lerner</a>, to render SVGs in <code>&lt;canvas&gt;</code> elements.
+  <p>phosphorus was created by <a href=https://github.com/nathan>Nathan Dinsmore</a>. Its CPS-style compilation and overall design was inspired by <a href=https://github.com/RHY3756547>Rhys Simpson</a>'s <a href=https://code.google.com/p/sb2-js/>sb2.js</a>. It would have more bugs if not for <a href=https://github.com/MathWizz>Truman Kilen</a>. It uses the <a href=http://stuk.github.io/jszip/>JSZip</a> library, created by <a href=https://github.com/stuk>Stuart Knightley</a>, <a href=https://github.com/dduponchel>David Duponchel</a>, Franz Buchinger, and <a href=https://github.com/aadsm>António Afonso</a>, to read <code>.sb2</code> files and compressed projects, and the <a href=https://code.google.com/p/canvg/>canvg</a> library, created by <a href=https://code.google.com/u/gabelerner@gmail.com/>Gabe Lerner</a>, to render SVGs in <code>&lt;canvas&gt;</code> elements. <a href=http://goo.gl/zI6A>HTML Games</a> added sound (via javascript wav conversion), various fixes and touch controls for tablets and mobile. Coming soon - compile your project to an APK via webview (as shown on the <a href=http://goo.gl/zI6A>HTML5 Game to Android App</a> Link)
   <h1>Code</h1>
-  <p>The source code for phosphorus is available <a href=https://github.com/nathan/phosphorus>on GitHub</a>.</p>
+  <p>The source code for phosphorus is available <a href=https://github.com/nathan/phosphorus>on GitHub</a>. <a href='../itch.zip' title='Download this fork...'>[Zip]</a></p>
 </section>
 <script src=fonts.js></script>
-<script src=//cdnjs.cloudflare.com/ajax/libs/jszip/2.4.0/jszip.js></script>
-<script src=//canvg.googlecode.com/svn/trunk/rgbcolor.js></script>
-<script src=//canvg.googlecode.com/svn/trunk/StackBlur.js></script>
-<script src=//canvg.googlecode.com/svn/trunk/canvg.js></script>
+<script src=jszip.js></script>
+<script src=rgbcolor.js></script>
+<script src=StackBlur.js></script>
+<script src=canvg.js></script>
 <script src=phosphorus.js></script>
 <script src=player.js></script>
 <script>
@@ -154,7 +177,7 @@
   });
 
   examples.addEventListener('change', function() {
-    if (examples.value) {
+    if (examples.value && !location.hash.length) { // pf
       location.hash = '#' + examples.value;
       examples.selectedIndex = 0;
     }
@@ -189,6 +212,27 @@
     }, function(title) {
       document.title = title ? title + ' \xb7 phosphorus' : 'phosphorus';
       updateBugLink();
+      // PF auto define touch keys B,A if the projects title contains use keys B and A
+      if (title.match("use keys ")) {
+	 var Bkey = title.split("use keys ")[1].split(" and ")[0]; 
+	 var Akey = title.split("use keys ")[1].split(" and ")[1];
+	 // assume is valid scratch key
+	 document.getElementById("touch_B").value = Bkey.toUpperCase().charCodeAt(0);
+	 document.getElementById("touch_A").value = Akey.toUpperCase().charCodeAt(0);
+	 // then check B 1st for hacked / extended types
+	 if (Bkey.match("space") || Bkey.match("ctrl") || Bkey.match("enter")) {
+	    if (Bkey.match("space")) document.getElementById("touch_B").value = 32;
+	    if (Bkey.match("ctrl")) document.getElementById("touch_B").value = 17;
+	    if (Bkey.match("enter")) document.getElementById("touch_B").value = 13;
+	 }
+	 // then A for hacked / extended types
+	 if (Akey.match("space") || Akey.match("ctrl") || Akey.match("enter")) {
+	    if (Akey.match("space")) document.getElementById("touch_A").value = 32;
+	    if (Akey.match("ctrl")) document.getElementById("touch_A").value = 17;
+	    if (Akey.match("enter")) document.getElementById("touch_A").value = 13;
+	 }
+	 console.log(document.getElementById("touch_B").value + ":" + document.getElementById("touch_A").value);
+      }
     });
 
     projectLink.href = P.player.projectURL;
@@ -202,14 +246,14 @@
   }
 
   function updatePackageLink() {
-    packageLink.href = P.player.projectId ? '/app.html?id=' + P.player.projectId + '&turbo=' + packageTurbo.checked + '&full-screen=' + packageFullScreen.checked : 'about:blank';
+    packageLink.href = P.player.projectId ? window.location.href.split("/#")[0] + '/app.html?id=' + P.player.projectId + '&turbo=' + packageTurbo.checked + '&full-screen=' + packageFullScreen.checked : 'about:blank';
   }
 
   packageTurbo.addEventListener('change', updatePackageLink);
   packageFullScreen.addEventListener('change', updatePackageLink);
 
   function updateEmbedCode(e) {
-    embedCode.value = P.player.projectId ? '<script src=https://' + location.host + '/embed.js?id=' + P.player.projectId + (embedHideControls.checked ? '&ui=false' : '&auto-start=' + embedAutoStart.checked + '&light-content=' + embedLightContent.checked) + '></' + 'script>' : '';
+    embedCode.value = P.player.projectId ? '<script src=' + window.location.href.split("/#")[0] + '/embed.js?id=' + P.player.projectId + (embedHideControls.checked ? '&ui=false' : '&auto-start=' + embedAutoStart.checked + '&light-content=' + embedLightContent.checked) + '></' + 'script>' : ''; // was  + location.host
     embedAutoStart.disabled =
     embedLightContent.disabled = embedHideControls.checked;
     if (embedHideControls.checked) embedAutoStart.checked = true;
