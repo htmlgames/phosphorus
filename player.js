@@ -38,8 +38,8 @@ P.player = (function() {
     if (flagTouchTimeout) {
       clearTimeout(flagTouchTimeout);
     }
-    if (e.shiftKey) {
-      turboClick();
+    if (e.shiftKey || e.ctrlKey) {
+      if (e.shiftKey) turboClick();
     } else {
       stage.start();
       pause.className = 'pause';
@@ -126,7 +126,11 @@ P.player = (function() {
       document.body.style.width = w + 'px';
       document.body.style.height = h + 'px';
       document.body.style.marginLeft = (window.innerWidth - w) / 2 + 'px';
-      document.body.style.marginTop = (window.innerHeight - h - padding) / 2 + 'px';
+      if ('ontouchstart' in document) {
+        document.body.style.marginTop = (window.innerHeight - h - padding) / 4 + 'px';
+      } else {
+        document.body.style.marginTop = (window.innerHeight - h - padding) / 2 + 'px';
+      }
       stage.setZoom(w / 480);
     } else {
       stage.setZoom(1);
@@ -172,6 +176,10 @@ P.player = (function() {
   });
 
   function load(id, cb, titleCallback) {
+    if (isNaN(id)) { // pf
+       P.player.projectId = "";
+       return
+    }
     P.player.projectId = id;
     P.player.projectURL = id ? 'http://scratch.mit.edu/projects/' + id + '/' : '';
 
@@ -181,6 +189,7 @@ P.player = (function() {
     }
     while (player.firstChild) player.removeChild(player.lastChild);
     turbo.style.display = 'none';
+    flag.title = 'Shift+click to enable turbo mode.'; // pf
     error.style.display = 'none';
     pause.className = 'pause';
     progressBar.style.display = 'none';
@@ -189,6 +198,7 @@ P.player = (function() {
       showProgress(P.IO.loadScratchr2Project(id), cb);
       P.IO.loadScratchr2ProjectTitle(id, function(title) {
         if (titleCallback) titleCallback(P.player.projectTitle = title);
+	P.player.bFast = (title.match("!")) ? true : false;
       });
     } else {
       if (titleCallback) setTimeout(function() {
