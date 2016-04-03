@@ -177,7 +177,7 @@ var P = (function() {
 
   IO.PROJECT_URL = 'http://projects.scratch.mit.edu/internalapi/project/';
   IO.ASSET_URL = 'http://cdn.assets.scratch.mit.edu/internalapi/asset/';
-  IO.SOUNDBANK_URL = "http://homepage.ntlworld.com/infinnerty/differences/UAT/itch/" + 'soundbank/';
+  IO.SOUNDBANK_URL = "" + 'soundbank/';
 
   IO.FONTS = {
     '': 'Helvetica',
