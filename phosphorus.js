@@ -1,9 +1,14 @@
+// additional bugfixes by PF. Please visit: goo.gl/zI6A
+var that; // PF
+
 var P = (function() {
   'use strict';
 
+  var bFast = true;
   var SCALE = window.devicePixelRatio || 1;
-
   var hasTouchEvents = 'ontouchstart' in document;
+  
+  if (hasTouchEvents && document.getElementById("touchscreen")) document.getElementById("touchscreen").style.display = "block";
 
   var inherits = function(cla, sup) {
     cla.prototype = Object.create(sup.prototype);
@@ -172,7 +177,7 @@ var P = (function() {
 
   IO.PROJECT_URL = 'http://projects.scratch.mit.edu/internalapi/project/';
   IO.ASSET_URL = 'http://cdn.assets.scratch.mit.edu/internalapi/asset/';
-  IO.SOUNDBANK_URL = 'https://cdn.rawgit.com/LLK/scratch-flash/v429/src/soundbank/';
+  IO.SOUNDBANK_URL = "http://homepage.ntlworld.com/infinnerty/differences/UAT/itch/" + 'soundbank/';
 
   IO.FONTS = {
     '': 'Helvetica',
@@ -413,18 +418,156 @@ var P = (function() {
     return request;
   };
 
+// PF - New audio stuff ***
+
   IO.decodeAudio = function(ab, cb) {
     if (audioContext) {
-      audioContext.decodeAudioData(ab, function(buffer) {
-        cb(buffer);
-      }, function(err) {
-        console.warn('Failed to load audio');
-        cb(null);
-      });
+    // PF check buffer type is PCM or ADPCM 1st? (ie headers)
+	var abc = false;
+	var uInt8Array = new Uint8Array(ab);
+	if (readBytes(20, 2, uInt8Array) == 17) { // 11 hex (needs to be 1)
+		console.warn('Processing audio conversion');
+      		// PF it's most likely ADPCM - lets hack the header and correct the buffer
+		abc = readADPCM(uInt8Array);
+	}
+        if (abc) { // new
+	  audioContext.decodeAudioData(abc, function(buffer) {
+          cb(buffer);
+          }, function(err) {
+          console.warn('Failed to convert audio');
+          cb(null);
+          });
+	} else { // old
+	  audioContext.decodeAudioData(ab, function(buffer) {
+          cb(buffer);
+          }, function(err) {
+          console.warn('Failed to load audio');
+          cb(null);
+          });
+	}
     } else {
       setTimeout(cb);
     }
   };
+
+// helper function
+function readBytes(start, length, uInt8Array) {
+	var returnval = 0;
+	for (var j = 0; j < length; j++) {
+		returnval += uInt8Array[start + j] << (8 * j);
+	}
+	return returnval;
+}
+
+function readADPCM(uInt8Array) {
+
+	var blockAlign = readBytes(32, 2, uInt8Array);
+	var samplesPerBlock = (blockAlign - 4);
+	var sampleRate = readBytes(24, 4, uInt8Array);
+
+	var offset = (readBytes(20, 2, uInt8Array) != 1) ? 38 + readBytes(36, 2, uInt8Array) : 36;
+	offset += 8 + readBytes(offset + 4, 4, uInt8Array);
+
+	var soundBytes = readBytes(offset + 4, 4, uInt8Array);
+	var nBlocks = soundBytes / blockAlign;
+	offset += 8;
+
+	var resultStepChange = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8];
+	var stepSizes = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767];
+
+	var stepID = 8;
+	var step = 16;
+	var volume = 0;
+	var sdi = 0;
+	var in_s;
+	var s = 0;
+	var byte;
+	var nib;
+	var diff;
+
+	var length = (samplesPerBlock * 4 + 2) * nBlocks;
+	var soundBuf = new ArrayBuffer(length + 32);
+	var soundData = new Uint8Array(soundBuf, 32, length);
+
+	for (var b = 0; b < nBlocks; b++)
+	{
+		in_s = s;
+
+		volume = readBytes(s + offset, 2, uInt8Array)
+		if (volume > 32767) volume = (volume - 65536);
+		stepID = Math.max(0, Math.min(readBytes(s + offset + 2, 1, uInt8Array), 88));
+		s += 4;
+
+		var sample = Math.round(volume);
+		if (sample < 0) sample += 65536; // 2's complement signed
+
+		soundData[sdi++] = sample % 256;
+		soundData[sdi++] = Math.floor(sample / 256);
+
+		for (var as = 0; as < samplesPerBlock; as++)
+		{
+			byte = uInt8Array[s + offset].toString(2);
+			while (byte.length < 8) {
+				byte = "0" + byte;
+			}
+
+			for (var nibble = 0; nibble < 2; nibble++)
+			{
+				nib = parseInt(byte.substr(nibble*4, 4), 2);
+				nib &= 15;
+				step = stepSizes[stepID];
+				diff = step >> 3;
+				if (nib & 1) diff += step >> 2;
+				if (nib & 2) diff += step >> 1;
+				if (nib & 4) diff += step;
+				if (nib & 8) diff = 0 - diff;
+				volume = Math.max(Math.min(32767, volume + diff), -32768)
+				var sample = Math.round(volume);
+				if (sample < 0) sample += 65536; // 2's complement signed
+				soundData[sdi++] = sample % 256;
+				soundData[sdi++] = Math.floor(sample / 256);
+				stepID = Math.max(0, Math.min(stepID + resultStepChange[nib], 88));
+			}
+			s += 1;
+		}
+		s = in_s + blockAlign;
+	}
+
+	return encodeAudio16bit(soundData, sampleRate, soundBuf);
+}
+
+function encodeAudio16bit(soundData, sampleRate, soundBuf) {
+
+	// 16-bit mono WAVE header template
+	var header = "RIFF<##>WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00<##><##>\x02\x00\x10\x00data<##>";
+
+	// Helper to insert a 32-bit little endian int.
+	function insertLong(value) {
+		var bytes = "";
+		for (var i = 0; i < 4; ++i) {
+			bytes += String.fromCharCode(value % 256);
+			value = Math.floor(value / 256);
+		}
+		header = header.replace('<##>', bytes);
+	}
+
+	var n = soundData.length / 2; // as buffer
+	insertLong(36 + n * 2); // ChunkSize
+	insertLong(sampleRate); // SampleRate
+	insertLong(sampleRate * 2); // ByteRate
+	insertLong(n * 2); // Subchunk2Size
+
+	// Output sound data
+	var bytes = new Uint8Array(soundBuf, 0, 40); // 32
+	for (var i = 0; i < header.length; i++)
+	{
+  		bytes[i] = header.charCodeAt(i)	;
+	}
+	console.log(new Uint8Array(soundBuf));
+	return soundBuf.slice(0);      
+}
+
+// PF end of New audio stuff ***
 
   IO.loadBase = function(data) {
     data.scripts = data.scripts || [];
@@ -467,22 +610,28 @@ var P = (function() {
 
   IO.fixSVG = function(svg, element) {
     if (element.nodeType !== 1) return;
-    if (element.nodeName === 'text') {
+    if (element.nodeName === 'text') { 
       var font = element.getAttribute('font-family') || '';
       font = IO.FONTS[font] || font;
       if (font) {
         element.setAttribute('font-family', font);
         if (font === 'Helvetica') element.style.fontWeight = 'bold';
       }
-      var size = +element.getAttribute('font-size');
+      var size = element.getAttribute('font-size');
+
       if (!size) {
         element.setAttribute('font-size', size = 18);
       }
       var bb = element.getBBox();
-      var x = 4 - .6 * element.transform.baseVal.consolidate().matrix.a;
+
+      // 2 lines below 'magic numbers' will be affected by font-size      
+      var x = 4 - 0.6 * element.transform.baseVal.consolidate().matrix.a;
       var y = (element.getAttribute('y') - bb.y) * 1.1;
-      element.setAttribute('x', x);
-      element.setAttribute('y', y);
+
+      // PF below seems better?
+      element.setAttribute('x', (element.getAttribute('x') - bb.x));
+      element.setAttribute('y', (element.getAttribute('y') - bb.y));
+
       var lines = element.textContent.split('\n');
       if (lines.length > 1) {
         element.textContent = lines[0];
@@ -490,8 +639,8 @@ var P = (function() {
         for (var i = 1, l = lines.length; i < l; i++) {
           var tspan = document.createElementNS(null, 'tspan');
           tspan.textContent = lines[i];
-          tspan.setAttribute('x', x);
-          tspan.setAttribute('y', y + size * i * lineHeight);
+          tspan.setAttribute('x', x/2);
+          tspan.setAttribute('y', y/2 + size * i * lineHeight);
           element.appendChild(tspan);
         }
       }
@@ -515,10 +664,12 @@ var P = (function() {
         var div = document.createElement('div');
         div.innerHTML = source;
         var svg = div.getElementsByTagName('svg')[0];
+if (!svg) return
         svg.style.visibility = 'hidden';
         svg.style.position = 'absolute';
         svg.style.left = '-10000px';
         svg.style.top = '-10000px';
+
         document.body.appendChild(svg);
         var viewBox = svg.viewBox.baseVal;
         if (viewBox && (viewBox.x || viewBox.y)) {
@@ -528,6 +679,7 @@ var P = (function() {
           viewBox.y = 0;
           viewBox.width = 0;
           viewBox.height = 0;
+
         }
         IO.fixSVG(svg, svg);
         while (div.firstChild) div.removeChild(div.lastChild);
@@ -736,7 +888,7 @@ var P = (function() {
     }
     var i = (Math.floor(costume) - 1 || 0) % this.costumes.length;
     if (i < 0) i += this.costumes.length;
-    this.currentCostumeIndex = i;
+    if (!isNaN(costume)) this.currentCostumeIndex = i;
     if (this.isStage) this.updateBackdrop();
     if (this.saying) this.updateBubble();
   };
@@ -828,6 +980,7 @@ var P = (function() {
   };
 
   var Stage = function() {
+    that = this; // PF global!
     this.stage = this;
 
     Stage.parent.call(this);
@@ -879,6 +1032,7 @@ var P = (function() {
     this.penCanvas.width = SCALE * 480;
     this.penCanvas.height = SCALE * 360;
     this.penContext = this.penCanvas.getContext('2d');
+
     this.penContext.lineCap = 'round';
     this.penContext.scale(SCALE, SCALE);
 
@@ -887,6 +1041,8 @@ var P = (function() {
     this.canvas.width = SCALE * 480;
     this.canvas.height = SCALE * 360;
     this.context = this.canvas.getContext('2d');
+
+    this.context.imageSmoothingEnabled = false; // PF
 
     this.canvas.tabIndex = 0;
     this.canvas.style.outline = 'none';
@@ -904,8 +1060,8 @@ var P = (function() {
     this.root.style.WebkitTransform = 'translateZ(0)';
 
     this.root.addEventListener('keydown', function(e) {
-      if (e.ctrlKey || e.altKey || e.metaKey) {
-        return;
+      if (e.altKey || e.metaKey || e.keyCode === 27) { // tjvr
+        return; // PF allow e.ctrlKey || 
       }
       this.keys[e.keyCode] = true;
       e.stopPropagation();
@@ -926,22 +1082,27 @@ var P = (function() {
     if (hasTouchEvents) {
 
       document.addEventListener('touchstart', function(e) {
+	if (e.target === this.canvas) {
         this.mousePressed = true;
         for (var i = 0; i < e.changedTouches.length; i++) {
           this.updateMouse(e.changedTouches[i]);
-          if (e.target === this.canvas) {
+          //if (e.target === this.canvas) {
             this.clickMouse();
           }
         }
-        if (e.target === this.canvas) e.preventDefault();
+        if (e.target === this.canvas) e.preventDefault(); // if done off canvas, we cannot scroll screen
       }.bind(this));
 
       document.addEventListener('touchmove', function(e) {
-        this.updateMouse(e.changedTouches[0]);
+        if (e.target === this.canvas) {
+	  this.updateMouse(e.changedTouches[0]);
+	}
       }.bind(this));
 
       document.addEventListener('touchend', function(e) {
-        this.releaseMouse();
+	if (e.target === this.canvas) {
+          this.releaseMouse();
+	}
       }.bind(this));
 
     } else {
@@ -966,6 +1127,23 @@ var P = (function() {
         this.releaseMouse();
       }.bind(this));
     }
+
+    // PF joystick trigger
+    document.addEventListener('gamepadConnected', function(e) {
+        this.gamepads[0] = e
+        console.log("Joystick Connected");
+        if (hasTouchEvents) document.getElementById("touchscreen").style.display = "none";
+        usingGamepad = true;
+        checkGamepad(e);
+	}.bind(this));
+    
+    document.addEventListener('gamepadDisconnected', function(e) {
+        this.gamepads[0] = void 0
+        console.log("Joystick Disconnected");
+        if (hasTouchEvents) document.getElementById("touchscreen").style.display = "block";
+        usingGamepad = false;
+	}.bind(this));
+    // PF end joystick trigger
 
     this.prompter = document.createElement('div');
     this.root.appendChild(this.prompter);
@@ -1031,6 +1209,7 @@ var P = (function() {
   inherits(Stage, Base);
 
   Stage.prototype.isStage = true;
+  Stage.prototype.bInProcDef = false; // pf - for speeding up rendered procdef's
 
   Stage.prototype.fromJSON = function(data) {
     Stage.parent.prototype.fromJSON.call(this, data);
@@ -1183,6 +1362,8 @@ var P = (function() {
   Stage.prototype.draw = function() {
     var context = this.context;
 
+    this.context.imageSmoothingEnabled = false; // PF
+
     this.canvas.width = 480 * this.zoom * SCALE; // clear
     this.canvas.height = 360 * this.zoom * SCALE;
 
@@ -1207,6 +1388,7 @@ var P = (function() {
   Stage.prototype.drawAllOn = function(context, except) {
     var costume = this.costumes[this.currentCostumeIndex];
     context.save();
+
     context.scale(costume.scale, costume.scale);
     context.globalAlpha = Math.max(0, Math.min(1, 1 - this.filters.ghost / 100));
     context.drawImage(costume.image, 0, 0);
@@ -1233,6 +1415,7 @@ var P = (function() {
   };
 
   var KEY_CODES = {
+    'ctrl': 17,
     'space': 32,
     'left arrow': 37,
     'up arrow': 38,
@@ -1241,6 +1424,7 @@ var P = (function() {
   };
 
   var getKeyCode = function(keyName) {
+    if (keyName && keyName.length > 0)
     return KEY_CODES[keyName.toLowerCase()] || keyName.toUpperCase().charCodeAt(0);
   };
 
@@ -1374,7 +1558,7 @@ var P = (function() {
     if (ox === x && oy === y && !this.isPenDown) return;
     this.scratchX = x;
     this.scratchY = y;
-    if (this.isPenDown) {
+    if (this.isPenDown) { // || !this.visible) { // PF todo
       var context = this.stage.penContext;
       if (this.penSize % 2 > .5 && this.penSize % 2 < 1.5) {
         ox -= .5;
@@ -1382,6 +1566,7 @@ var P = (function() {
         x -= .5;
         y -= .5;
       }
+
       context.strokeStyle = this.penCSS || 'hsl(' + this.penHue + ',' + this.penSaturation + '%,' + (this.penLightness > 100 ? 200 - this.penLightness : this.penLightness) + '%)';
       context.lineWidth = this.penSize;
       context.beginPath();
@@ -1414,6 +1599,8 @@ var P = (function() {
     if (costume) {
       context.save();
 
+      context.imageSmoothingEnabled = false;
+
       var z = this.stage.zoom * SCALE;
       context.translate(((this.scratchX + 240) * z | 0) / z, ((180 - this.scratchY) * z | 0) / z);
       if (this.rotationStyle === 'normal') {
@@ -1423,7 +1610,7 @@ var P = (function() {
       }
       context.scale(this.scale, this.scale);
       context.scale(costume.scale, costume.scale);
-      context.translate(-costume.rotationCenterX, -costume.rotationCenterY);
+      context.translate(-costume.rotationCenterX, -costume.rotationCenterY); // ---
 
       if (!noEffects) context.globalAlpha = Math.max(0, Math.min(1, 1 - this.filters.ghost / 100));
 
@@ -1454,7 +1641,18 @@ var P = (function() {
       if (x < bounds.left || y < bounds.bottom || x > bounds.right || y > bounds.top) {
         return false;
       }
-      var d = costume.context.getImageData((x - this.scratchX) * costume.bitmapResolution + costume.rotationCenterX, (this.scratchY - y) * costume.bitmapResolution + costume.rotationCenterY, 1, 1).data;
+      var cx = (x - this.scratchX) / this.scale
+      var cy = (this.scratchY - y) / this.scale
+      if (this.rotationStyle === 'normal' && this.direction !== 90) {
+        var d = (90 - this.direction) * Math.PI / 180
+        var ox = cx
+        var s = Math.sin(d), c = Math.cos(d)
+        cx = c * ox - s * cy
+        cy = s * ox + c * cy
+      } else if (this.rotationStyle === 'leftRight' && this.direction < 0) {
+        cx = -cx
+      }
+      var d = costume.context.getImageData(cx * costume.bitmapResolution + costume.rotationCenterX, cy * costume.bitmapResolution + costume.rotationCenterY, 1, 1).data;
       return d[3] !== 0;
     } else if (thing === '_edge_') {
       var bounds = this.rotatedBounds();
@@ -1480,6 +1678,9 @@ var P = (function() {
 
         collisionCanvas.width = right - left;
         collisionCanvas.height = top - bottom;
+        // PF canvas size should not be zero
+        if (collisionCanvas.width == 0) {collisionCanvas.width = 1;}
+        if (collisionCanvas.height == 0) {collisionCanvas.height = 1;}
 
         collisionContext.save();
         collisionContext.translate(-(left + 240), -(180 - top));
@@ -1490,12 +1691,14 @@ var P = (function() {
 
         collisionContext.restore();
 
-        var data = collisionContext.getImageData(0, 0, right - left, top - bottom).data;
-
-        var length = (right - left) * (top - bottom) * 4;
-        for (var j = 0; j < length; j += 4) {
-          if (data[j + 3]) {
-            return true;
+	var length = (right - left) * (top - bottom) * 4;
+        if (length) {
+          var data = collisionContext.getImageData(0, 0, right - left, top - bottom).data;
+          
+          for (var j = 0; j < length; j += 4) {
+            if (data[j + 3]) {
+              return true;
+            }
           }
         }
       }
@@ -1517,13 +1720,16 @@ var P = (function() {
 
     collisionContext.restore();
 
-    var data = collisionContext.getImageData(0, 0, b.right - b.left, b.top - b.bottom).data;
-
-    rgb = rgb & 0xffffff;
     var length = (b.right - b.left) * (b.top - b.bottom) * 4;
-    for (var i = 0; i < length; i += 4) {
-      if ((data[i] << 16 | data[i + 1] << 8 | data[i + 2]) === rgb && data[i + 3]) {
-        return true;
+    if (length) { // PF
+      var data = collisionContext.getImageData(0, 0, b.right - b.left, b.top - b.bottom).data;
+
+      rgb = rgb & 0xffffff;
+      
+      for (var i = 0; i < length; i += 4) {
+        if ((data[i] << 16 | data[i + 1] << 8 | data[i + 2]) === rgb && data[i + 3]) {
+          return true;
+        }
       }
     }
 
@@ -1567,7 +1773,7 @@ var P = (function() {
     var costume = this.costumes[this.currentCostumeIndex];
 
     var s = costume.scale * this.scale;
-    var left = -costume.rotationCenterX * s;
+    var left = -costume.rotationCenterX * s; // ---
     var top = costume.rotationCenterY * s;
     var right = left + costume.image.width * s;
     var bottom = top - costume.image.height * s;
@@ -1636,6 +1842,10 @@ var P = (function() {
   Sprite.prototype.gotoObject = function(thing) {
     if (thing === '_mouse_') {
       this.moveTo(this.stage.mouseX, this.stage.mouseY);
+    } else if (thing === '_random_') {
+      var x = Math.round(480 * Math.random() - 240);
+      var y = Math.round(360 * Math.random() - 180);
+      this.moveTo(x, y);
     } else {
       var sprite = this.stage.getObject(thing);
       if (!sprite) return 0;
@@ -1647,13 +1857,21 @@ var P = (function() {
     if (thing === '_mouse_') {
       var x = this.stage.mouseX;
       var y = this.stage.mouseY;
+      //this.direction = Math.atan2(x - this.scratchX, y - this.scratchY) * 180 / Math.PI;
     } else {
       var sprite = this.stage.getObject(thing);
       if (!sprite) return 0;
       x = sprite.scratchX;
       y = sprite.scratchY;
+      //this.direction = Math.atan2(y - this.scratchY, x - this.scratchX) * 180 / Math.PI + 90;
     }
-    this.direction = Math.atan2(x - this.scratchX, y - this.scratchY) * 180 / Math.PI;
+    var dx = x - this.scratchX;
+    var dy = y - this.scratchY;
+    if (dx === 0 && dy === 0) {
+      this.direction = 90;
+    } else {
+      this.direction = Math.atan2(dx, dy) * 180 / Math.PI;
+    }
     if (this.saying) this.updateBubble();
   };
 
@@ -1688,6 +1906,9 @@ var P = (function() {
       this.bubblePointer.style.width = ''+(44/14)+'em';
       this.bubblePointer.style.background = 'url(icons.svg) '+(-195/14)+'em '+(-4/14)+'em';
       this.bubblePointer.style.backgroundSize = ''+(320/14)+'em '+(96/14)+'em';
+      this.stage.root.appendChild(this.bubble);
+    } else { // tjvr
+      this.stage.root.removeChild(this.bubble); 
       this.stage.root.appendChild(this.bubble);
     }
     this.bubblePointer.style.backgroundPositionX = ((thinking ? -259 : -195)/14)+'em';
@@ -1757,10 +1978,16 @@ var P = (function() {
     this.image = document.createElement('canvas');
     this.context = this.image.getContext('2d');
 
+    this.context.imageSmoothingEnabled = false; // PF
+
     this.render();
-    this.baseLayer.onload = function() {
-      this.render();
-    }.bind(this);
+    
+    if (this.baseLayer) { // PF new block
+      this.baseLayer.onload = function() {
+        this.render();
+      }.bind(this);
+    }
+    
     if (this.textLayer) {
       this.textLayer.onload = this.baseLayer.onload;
     }
@@ -1768,13 +1995,15 @@ var P = (function() {
   addEvents(Costume, 'load');
 
   Costume.prototype.render = function() {
-    if (!this.baseLayer.width || this.textLayer && !this.textLayer.width) {
-      return;
-    }
-    this.image.width = this.baseLayer.width;
-    this.image.height = this.baseLayer.height;
 
+    this.image.width = (this.baseLayer) ? this.baseLayer.width : 0; // PF
+    this.image.height = (this.baseLayer) ? this.baseLayer.height : 0; // PF
+    
+    this.context.imageSmoothingEnabled = false; // PF
+
+    if (this.baseLayer) { // PF
     this.context.drawImage(this.baseLayer, 0, 0);
+    }
     if (this.textLayer) {
       this.context.drawImage(this.textLayer, 0, 0);
     }
@@ -2177,7 +2406,9 @@ P.compile = (function() {
     };
 
     var val = function(e, usenum, usebool) {
+      // PF added e && check
       var v;
+
       if (typeof e === 'number' || typeof e === 'boolean') {
 
         return '' + e;
@@ -2192,7 +2423,7 @@ P.compile = (function() {
           .replace(/\{/g, '\\x7b')
           .replace(/\}/g, '\\x7d') + '"';
 
-      } else if (e[0] === 'getParam') { /* Data */
+      } else if (e && e[0] === 'getParam') { /* Data */
 
         return param(e[1], usenum, usebool);
 
@@ -2200,184 +2431,184 @@ P.compile = (function() {
 
         return v;
 
-      } else if (e[0] === 'costumeName') {
+      } else if (e && e[0] === 'costumeName') {
 
         return 'S.getCostumeName()';
 
-      } else if (e[0] === 'sceneName') {
+      } else if (e && e[0] === 'sceneName') {
 
         return 'self.getCostumeName()';
 
-      } else if (e[0] === 'readVariable') {
+      } else if (e && e[0] === 'readVariable') {
 
         return varRef(e[1]);
 
-      } else if (e[0] === 'contentsOfList:') {
+      } else if (e && e[0] === 'contentsOfList:') {
 
         return 'contentsOfList(' + listRef(e[1]) + ')';
 
-      } else if (e[0] === 'getLine:ofList:') {
+      } else if (e && e[0] === 'getLine:ofList:') {
 
         return 'getLineOfList(' + listRef(e[2]) + ', ' + val(e[1]) + ')';
 
-      } else if (e[0] === 'concatenate:with:') {
+      } else if (e && e[0] === 'concatenate:with:') {
 
         return '("" + ' + val(e[1]) + ' + ' + val(e[2]) + ')';
 
-      } else if (e[0] === 'letter:of:') {
+      } else if (e && e[0] === 'letter:of:') {
 
         return '(("" + ' + val(e[2]) + ')[(' + num(e[1]) + ' | 0) - 1] || "")';
 
-      } else if (e[0] === 'answer') { /* Sensing */
+      } else if (e && e[0] === 'answer') { /* Sensing */
 
         return 'self.answer';
 
-      } else if (e[0] === 'getAttribute:of:') {
+      } else if (e && e[0] === 'getAttribute:of:') {
 
         return 'attribute(' + val(e[1]) + ', ' + val(e[2]) + ')';
 
-      } else if (e[0] === 'getUserId') {
+      } else if (e && e[0] === 'getUserId') {
 
         return '0';
 
-      } else if (e[0] === 'getUserName') {
+      } else if (e && e[0] === 'getUserName') {
 
         return '""';
 
       } else {
 
-        warn('Undefined val: ' + e[0]);
+        warn('Undefined val');
 
       }
     };
 
     var numval = function(e) {
-
-      if (e[0] === 'xpos') { /* Motion */
+       // PF added e && check
+      if (e && e[0] === 'xpos') { /* Motion */
 
         return 'S.scratchX';
 
-      } else if (e[0] === 'ypos') {
+      } else if (e && e[0] === 'ypos') {
 
         return 'S.scratchY';
 
-      } else if (e[0] === 'heading') {
+      } else if (e && e[0] === 'heading') {
 
         return 'S.direction';
 
-      } else if (e[0] === 'costumeIndex') { /* Looks */
+      } else if (e && e[0] === 'costumeIndex') { /* Looks */
 
         return '(S.currentCostumeIndex + 1)';
 
-      } else if (e[0] === 'backgroundIndex') {
+      } else if (e && e[0] === 'backgroundIndex') {
 
         return '(self.currentCostumeIndex + 1)';
 
-      } else if (e[0] === 'scale') {
+      } else if (e && e[0] === 'scale') {
 
         return '(S.scale * 100)';
 
-      } else if (e[0] === 'volume') { /* Sound */
+      } else if (e && e[0] === 'volume') { /* Sound */
 
         return '(S.volume * 100)';
 
-      } else if (e[0] === 'tempo') {
+      } else if (e && e[0] === 'tempo') {
 
         return 'self.tempoBPM';
 
-      } else if (e[0] === 'lineCountOfList:') { /* Data */
+      } else if (e && e[0] === 'lineCountOfList:') { /* Data */
 
         return listRef(e[1]) + '.length';
 
-      } else if (e[0] === '+') { /* Operators */
+      } else if (e && e[0] === '+') { /* Operators */
 
         return '(' + num(e[1]) + ' + ' + num(e[2]) + ' || 0)';
 
-      } else if (e[0] === '-') {
+      } else if (e && e[0] === '-') {
 
         return '(' + num(e[1]) + ' - ' + num(e[2]) + ' || 0)';
 
-      } else if (e[0] === '*') {
+      } else if (e && e[0] === '*') {
 
         return '(' + num(e[1]) + ' * ' + num(e[2]) + ' || 0)';
 
-      } else if (e[0] === '/') {
+      } else if (e && e[0] === '/') {
 
         return '(' + num(e[1]) + ' / ' + num(e[2]) + ' || 0)';
 
-      } else if (e[0] === 'randomFrom:to:') {
+      } else if (e && e[0] === 'randomFrom:to:') {
 
         return 'random(' + num(e[1]) + ', ' + num(e[2]) + ')';
 
-      } else if (e[0] === 'abs') {
+      } else if (e && e[0] === 'abs') {
 
         return 'Math.abs(' + num(e[1]) + ')';
 
-      } else if (e[0] === 'sqrt') {
+      } else if (e && e[0] === 'sqrt') {
 
         return 'Math.sqrt(' + num(e[1]) + ')';
 
-      } else if (e[0] === 'stringLength:') {
+      } else if (e && e[0] === 'stringLength:') {
 
         return '("" + ' + val(e[1]) + ').length';
 
-      } else if (e[0] === '%' || e[0] === '\\\\') {
+      } else if ( e && (e[0] === '%' || e[0] === '\\\\') ) {
 
         return 'mod(' + num(e[1]) + ', ' + num(e[2]) + ')';
 
-      } else if (e[0] === 'rounded') {
+      } else if (e && e[0] === 'rounded') {
 
         return 'Math.round(' + num(e[1]) + ')';
 
-      } else if (e[0] === 'computeFunction:of:') {
+      } else if (e && e[0] === 'computeFunction:of:') {
 
         return 'mathFunc(' + val(e[1]) + ', ' + num(e[2]) + ')';
 
-      } else if (e[0] === 'mouseX') { /* Sensing */
+      } else if (e && e[0] === 'mouseX') { /* Sensing */
 
         return 'self.mouseX';
 
-      } else if (e[0] === 'mouseY') {
+      } else if (e && e[0] === 'mouseY') {
 
         return 'self.mouseY';
 
-      } else if (e[0] === 'timer') {
+      } else if (e && e[0] === 'timer') {
 
         return '((self.now() - self.timerStart) / 1000)';
 
-      } else if (e[0] === 'distanceTo:') {
+      } else if (e && e[0] === 'distanceTo:') {
 
         return 'S.distanceTo(' + val(e[1]) + ')';
 
-      // } else if (e[0] === 'soundLevel') {
+      // } else if (e && e[0] === 'soundLevel') {
 
-      } else if (e[0] === 'timestamp') {
+      } else if (e && e[0] === 'timestamp') {
 
         return '((Date.now() - epoch) / 86400000)';
 
-      } else if (e[0] === 'timeAndDate') {
+      } else if (e && e[0] === 'timeAndDate') {
 
         return 'timeAndDate(' + val(e[1]) + ')';
 
-      // } else if (e[0] === 'sensor:') {
+      // } else if (e && e[0] === 'sensor:') {
 
       }
     };
 
     var DIGIT = /\d/;
     var boolval = function(e) {
-
-      if (e[0] === 'list:contains:') { /* Data */
+      // PF added e && check
+      if (e && e[0] === 'list:contains:') { /* Data */
 
         return 'listContains(' + listRef(e[1]) + ', ' + val(e[2]) + ')';
 
-      } else if (e[0] === '<' || e[0] === '>') { /* Operators */
+      } else if ( e && (e[0] === '<' || e[0] === '>') ) { /* Operators */
 
-        if (typeof e[1] === 'string' && DIGIT.test(e[1]) || typeof e[1] === 'number') {
+        if ( e && typeof e[1] === 'string' && (DIGIT.test(e[1]) || typeof e[1] === 'number') ) {
           var less = e[0] === '<';
           var x = e[1];
           var y = e[2];
-        } else if (typeof e[2] === 'string' && DIGIT.test(e[2]) || typeof e[2] === 'number') {
+        } else if ( e && typeof e[2] === 'string' && (DIGIT.test(e[2]) || typeof e[2] === 'number') ) {
           var less = e[0] === '>';
           var x = e[2];
           var y = e[1];
@@ -2388,12 +2619,12 @@ P.compile = (function() {
         }
         return (less ? 'numLess' : 'numGreater') + '(' + nx + ', ' + val(y) + ')';
 
-      } else if (e[0] === '=') {
+      } else if (e && e[0] === '=') {
 
-        if (typeof e[1] === 'string' && DIGIT.test(e[1]) || typeof e[1] === 'number') {
+        if ( e && typeof e[1] === 'string' && (DIGIT.test(e[1]) || typeof e[1] === 'number') ) {
           var x = e[1];
           var y = e[2];
-        } else if (typeof e[2] === 'string' && DIGIT.test(e[2]) || typeof e[2] === 'number') {
+        } else if ( e && typeof e[2] === 'string' && (DIGIT.test(e[2]) || typeof e[2] === 'number') ) {
           var x = e[2];
           var y = e[1];
         }
@@ -2403,39 +2634,39 @@ P.compile = (function() {
         }
         return '(numEqual(' + nx + ', ' + val(y) + '))';
 
-      } else if (e[0] === '&') {
+      } else if (e && e[0] === '&') {
 
         return '(' + bool(e[1]) + ' && ' + bool(e[2]) + ')';
 
-      } else if (e[0] === '|') {
+      } else if (e && e[0] === '|') {
 
         return '(' + bool(e[1]) + ' || ' + bool(e[2]) + ')';
 
-      } else if (e[0] === 'not') {
+      } else if (e && e[0] === 'not') {
 
         return '!' + bool(e[1]) + '';
 
-      } else if (e[0] === 'mousePressed') { /* Sensing */
+      } else if (e && e[0] === 'mousePressed') { /* Sensing */
 
         return 'self.mousePressed';
 
-      } else if (e[0] === 'touching:') {
+      } else if (e && e[0] === 'touching:') {
 
         return 'S.touching(' + val(e[1]) + ')';
 
-      } else if (e[0] === 'touchingColor:') {
+      } else if (e && e[0] === 'touchingColor:') {
 
         return 'S.touchingColor(' + val(e[1]) + ')';
 
-      // } else if (e[0] === 'color:sees:') {
+      // } else if (e && e[0] === 'color:sees:') {
 
-      } else if (e[0] === 'keyPressed:') {
-
+      } else if (e && e[0] === 'keyPressed:') {
+	if (e[1] === "") e[1] = "ctrl"; // PF ctrl hack!
         return '!!self.keys[P.getKeyCode(' + val(e[1]) + ')]';
 
-      // } else if (e[0] === 'isLoud') {
+      // } else if (e && e[0] === 'isLoud') {
 
-      // } else if (e[0] === 'sensorPressed:') {
+      // } else if (e && e[0] === 'sensorPressed:') {
 
       }
     };
@@ -2508,12 +2739,18 @@ P.compile = (function() {
         source += 'console.log(' + val(block[0]) + ');\n';
       }
 
-      if (['forward:', 'turnRight:', 'turnLeft:', 'heading:', 'pointTowards:', 'gotoX:y:', 'gotoSpriteOrMouse:', 'changeXposBy:', 'xpos:', 'changeYposBy:', 'ypos:', 'bounceOffEdge', 'setRotationStyle', 'lookLike:', 'nextCostume', 'say:duration:elapsed:from:', 'say:', 'think:duration:elapsed:from:', 'think:', 'changeGraphicEffect:by:', 'setGraphicEffect:to:', 'filterReset', 'changeSizeBy:', 'setSizeTo:', 'comeToFront', 'goBackByLayers:', 'glideSecs:toX:y:elapsed:from:'].indexOf(block[0]) !== -1) {
-        source += 'if (S.visible) VISUAL = true;\n';
+      if (['turnRight:', 'turnLeft:', 'heading:', 'pointTowards:', 'setRotationStyle', 'lookLike:', 'nextCostume', 'say:duration:elapsed:from:', 'say:', 'think:duration:elapsed:from:', 'think:', 'changeGraphicEffect:by:', 'setGraphicEffect:to:', 'filterReset', 'changeSizeBy:', 'setSizeTo:', 'comeToFront', 'goBackByLayers:'].indexOf(block[0]) !== -1) {
+          source += 'if (S.visible) VISUAL = true;\n';
+      } else if (['forward:', 'gotoX:y:', 'gotoSpriteOrMouse:', 'changeXposBy:', 'xpos:', 'changeYposBy:', 'ypos:', 'bounceOffEdge', 'glideSecs:toX:y:elapsed:from:'].indexOf(block[0]) !== -1) {
+          source += 'if (S.visible || S.isPenDown) VISUAL = true;\n';
       } else if (['showBackground:', 'startScene', 'nextBackground', 'nextScene', 'startSceneAndWait', 'show', 'hide', 'putPenDown', 'stampCostume', 'showVariable:', 'hideVariable:', 'doAsk', 'setVolumeTo:', 'changeVolumeBy:', 'setTempoTo:', 'changeTempoBy:'].indexOf(block[0]) !== -1) {
         source += 'VISUAL = true;\n';
       }
-
+      // PF new block below - for show / hide trick some projects use (like manic miner)      
+	else if (that.bInProcDef) {
+        source += 'VISUAL = false;\n';
+      }
+      
       if (block[0] === 'forward:') { /* Motion */
 
         source += 'S.forward(' + num(block[1]) + ');\n';
@@ -2596,7 +2833,7 @@ P.compile = (function() {
         source += 'R.threads = sceneChange();\n';
         source += 'if (R.threads.indexOf(BASE) !== -1) return;\n';
         var id = label();
-        source += 'if (!running(R.threads)) {\n';
+        source += 'if (running(R.threads)) {\n'; // removed !
         forceQueue(id);
         source += '}\n';
         source += 'restore();\n';
@@ -2814,19 +3051,19 @@ P.compile = (function() {
       } else if (block[0] === 'penSize:') {
 
         source += 'var f = ' + num(block[1]) + ';\n';
-        source += 'S.penSize = f < 0 ? 0 : f;\n';
+        source += 'S.penSize = f < 1 ? 1 : f;\n';
 
       } else if (block[0] === 'changePenSizeBy:') {
 
         source += 'var f = S.penSize + ' + num(block[1]) + ';\n';
-        source += 'S.penSize = f < 0 ? 0 : f;\n';
+        source += 'S.penSize = f < 1 ? 1 : f;\n';
 
       } else if (block[0] === 'stampCostume') {
 
         source += 'S.draw(self.penContext);\n';
 
       } else if (block[0] === 'setVar:to:') { /* Data */
-
+	if(block[2] == '/,0,0') block[2] = 'NaN'; // PF fix NaN
         source += varRef(block[1]) + ' = ' + val(block[2]) + ';\n';
 
       } else if (block[0] === 'changeVar:by:') {
@@ -2859,9 +3096,9 @@ P.compile = (function() {
         var o = object.vars[block[1]] !== undefined ? 'S' : 'self';
         source += o + '.showVariable(' + val(block[1]) + ', ' + isShow + ');\n';
 
-      // } else if (block[0] === 'showList:') {
+       //} else if (block[0] === 'showList:') { // PF
 
-      // } else if (block[0] === 'hideList:') {
+       //} else if (block[0] === 'hideList:') { // PF
 
       } else if (block[0] === 'broadcast:') { /* Control */
 
@@ -3019,7 +3256,6 @@ P.compile = (function() {
         wait(num(block[1]));
 
       } else if (block[0] === 'warpSpeed') {
-
         source += 'WARP++;\n';
         seq(block[1]);
         source += 'WARP--;\n';
@@ -3091,6 +3327,7 @@ P.compile = (function() {
     }
 
     if (script[0][0] === 'procDef') {
+      that.bInProcDef = false; // pf0
       source += 'endCall();\n';
       source += 'return;\n';
     }
@@ -3168,12 +3405,20 @@ P.compile = (function() {
     } else if (script[0][0] === 'whenIReceive') {
       var key = script[0][1].toLowerCase();
       (object.listeners.whenIReceive[key] || (object.listeners.whenIReceive[key] = [])).push(f);
-    } else if (script[0][0] === 'whenKeyPressed') {
-      object.listeners.whenKeyPressed[P.getKeyCode(script[0][1])].push(f);
+    } else if (script[0][0] === 'whenKeyPressed') { // any
+      if (script[0][1] == "") script[0][1] = "ctrl"; // PF ctrl hack!
+      if (script[0][1] == 'any') {
+        for (var any = 127;any--;) { 
+	  object.listeners.whenKeyPressed[any].push(f);
+	}
+      } else {
+        object.listeners.whenKeyPressed[P.getKeyCode(script[0][1])].push(f);
+      }
     } else if (script[0][0] === 'whenSceneStarts') {
       var key = script[0][1].toLowerCase();
       (object.listeners.whenSceneStarts[key] || (object.listeners.whenSceneStarts[key] = [])).push(f);
-    } else if (script[0][0] === 'procDef') {
+    } else if (script[0][0] === 'procDef') { 
+      if (P.player.bFast) that.bInProcDef = script[0][4]; // pf1 - this enables a faster screen redraw (has side effects!)
       object.procedures[script[0][1]] = {
         inputs: inputs,
         warp: script[0][4],
@@ -3585,6 +3830,7 @@ P.runtime = (function() {
   };
 
   // var lastCalls = [];
+  // PF fn below runs after compile!
   var call = function(spec, id, values) {
     // lastCalls.push(spec);
     // if (lastCalls.length > 10000) lastCalls.shift();
@@ -3811,6 +4057,10 @@ P.runtime = (function() {
       } while ((self.isTurbo || !VISUAL) && Date.now() - start < 1000 / this.framerate && queue.length);
       this.draw();
       S = null;
+      // PF
+      if (this.isRunning && usingGamepad) {
+      	//checkGamepad(usingTouch); // todo...
+      }
     };
 
     P.Stage.prototype.onError = function(e) {
@@ -3880,3 +4130,116 @@ P.runtime = (function() {
   };
 
 }());
+
+// PF add touchscreen and joystick controls - EXPERMENTAL (Portrait) testing on nexus 7!
+var usingGamepad = false;
+// to redefine touch buttons B and A, pause the game and touch button to update...
+var g_b = false;
+var g_a = false;
+
+function checkGamepad(usingTouch) {
+	if (!usingTouch) {
+		var gp = navigator.getGamepads()[0];
+		if (gp) {
+			var axeLF = gp.axes[0];
+			var axeUF = gp.axes[1];
+			var but0 = gp.buttons[0];
+			var but1 = gp.buttons[1];
+			var start = gp.buttons[11];
+		}
+	}
+	
+	if (usingTouch && (!g_b&&!g_a)) { // B,A not yet defined!
+		g_b = (document.getElementById("touch_B").value) ? document.getElementById("touch_B").value : 13; // hardcoded to enter
+		g_a = (document.getElementById("touch_A").value) ? document.getElementById("touch_A").value : 32; // hardcoded to space
+	}
+
+	if(usingTouch == "left" || axeLF < -0.5) { 
+		that.keys[37] = true;
+		that.keys[39] = false;
+		//that.trigger('whenKeyPressed', 37);
+	} else if(usingTouch == "right" || axeLF > 0.5) {
+		that.keys[39] = true;
+		that.keys[37] = false;
+		//that.trigger('whenKeyPressed', 39);
+	} else {
+		if(usingTouch == "left_cancel" || axeLF > -0.5) {
+		  that.keys[37] = false;
+		}
+		if(usingTouch == "right_cancel" || axeLF < 0.5) {  
+		  that.keys[39] = false;
+		}
+	}
+
+	if(usingTouch == "up" || axeUF < -0.5) { 
+		that.keys[38] = true;
+		that.keys[40] = false;
+		//that.trigger('whenKeyPressed', 38);
+	} else if(usingTouch == "down" || axeUF > 0.5) {
+		that.keys[40] = true;
+		that.keys[38] = false;
+		//that.trigger('whenKeyPressed', 40);
+	} else {
+		if(usingTouch == "up_cancel" || axeUF > -0.5) {
+		  that.keys[38] = false;
+		}
+		if(usingTouch == "down_cancel" || axeUF < 0.5) {
+		  that.keys[40] = false;
+		}
+	}
+	if(usingTouch == "a" || but0&&but0.pressed) {
+	    if(that.isRunning) {
+		that.keys[g_a] = true;
+		//that.trigger('whenKeyPressed', g_a);
+	    } else {
+		var g_ac = g_a;
+		if (g_ac > 32) {
+		    g_ac = String.fromCharCode(g_a);
+		} else {
+		   if (g_ac == 32) g_ac = "space";
+		   if (g_ac == 17) g_ac = "ctrl";
+		   if (g_ac == 13) g_ac = "enter";
+		}
+		var keyDefine = prompt("Button A is currently set to emulate " + g_ac + "\n\nPlease press new key for Button A to emulate (or type ctrl, enter):","");
+		if (keyDefine) {
+			that.keys[g_a] = false;
+			g_a = (keyDefine == "enter") ? 13 : (keyDefine == "ctrl") ? 17 : keyDefine.toUpperCase().charCodeAt(0);
+			try {
+			    stage.start();
+			    document.querySelector('.play').className = 'pause';
+			} catch(e){}
+		} 
+	    }
+	} else {
+		that.keys[g_a] = false;
+	}
+	if(usingTouch == "b" || but1&&but1.pressed) {
+	    if(that.isRunning) {
+		that.keys[g_b] = true;
+		//that.trigger('whenKeyPressed', g_b);
+	    } else {
+		var g_bc = g_b;
+		if (g_bc > 32) {
+		    g_bc = String.fromCharCode(g_b);
+		} else {
+		   if (g_bc == 32) g_bc = "space";
+		   if (g_bc == 17) g_bc = "ctrl";
+		   if (g_bc == 13) g_bc = "enter";
+		}
+		var keyDefine = prompt("Button B is currently set to emulate " + g_bc + "\n\nPlease press new key for Button B to emulate (or type ctrl, enter):","");
+		if (keyDefine) {
+			that.keys[g_b] = false;
+			g_b = (keyDefine == "enter") ? 13 : (keyDefine == "ctrl") ? 17 : keyDefine.toUpperCase().charCodeAt(0);
+			try {
+			    stage.start();
+			    document.querySelector('.play').className = 'pause';
+			} catch(e){}
+		} 
+	    }
+	} else {
+		that.keys[g_b] = false;
+	}
+	if (start&&start.pressed) {
+		//window.location.reload();
+	}
+}
