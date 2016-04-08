@@ -3687,9 +3687,9 @@ P.runtime = (function() {
       case 'tan':
         return Math.tan(x * Math.PI / 180);
       case 'asin':
-        return Math.abs(x > 1) ? Math.asin(x * Math.PI / 180) : Math.asin(x) * 180 / Math.PI; // pf
+        return isNaN(Math.asin(x)) ? Math.asin(x * 0.01745329251) : Math.asin(x) * 57.2957795131; // pf
       case 'acos':
-        return Math.abs(x > 1) ? Math.acos(x * Math.PI / 180) : Math.acos(x) * 180 / Math.PI; // pf
+        return isNaN(Math.acos(x)) ? Math.acos(x * 0.01745329251) : Math.acos(x) * 57.2957795131; // pf
       case 'atan':
         return Math.atan(x) * 180 / Math.PI;
       case 'ln':
