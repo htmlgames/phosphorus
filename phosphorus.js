@@ -3691,7 +3691,7 @@ P.runtime = (function() {
       case 'acos':
         return Math.acos(x * Math.PI / 180); // pf RADIANS
       case 'atan':
-        return Math.atan(x); // pf ?
+        return Math.atan(x) * 180 / Math.PI;
       case 'ln':
         return Math.log(x);
       case 'log':
