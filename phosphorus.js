@@ -3687,11 +3687,11 @@ P.runtime = (function() {
       case 'tan':
         return Math.tan(x * Math.PI / 180);
       case 'asin':
-        return Math.asin(x * Math.PI / 180) * 180 / Math.PI; // pf RADIANS
+        return Math.asin(x * Math.PI / 180); // pf RADIANS
       case 'acos':
-        return Math.acos(x * Math.PI / 180) * 180 / Math.PI; // pf RADIANS
+        return Math.acos(x * Math.PI / 180); // pf RADIANS
       case 'atan':
-        return Math.atan(x) * 180 / Math.PI;
+        return Math.atan(x); // pf ?
       case 'ln':
         return Math.log(x);
       case 'log':
